@@ -2,7 +2,7 @@
   "method": "GET",
   "url": "http://127.0.0.1:9081",
   "headers": {
-    "Authentication": "Basic bG9naW46cGFzc3dvcmQ=",
-    "Accept": "application/json"
+    "Authentication": ["Basic bG9naW46cGFzc3dvcmQ="],
+    "Accept": ["application/json"]
   }
 }
