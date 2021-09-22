@@ -13,38 +13,36 @@ const DefaultRequestKey = "f229fcff-012d-4ad7-8b1a-88bf0ce2aba9"
 
 // describe structure of log record
 type ServerLogRecordType struct {
-	Received time.Time
-	ClientData ClientRequestType
+	Received    time.Time
+	ClientData  ClientRequestType
 	ServiceData ServiceResponseType
 }
 
 // struct to manage client's requests
 // map key is request key (uuid)
 type ServerType struct {
+	IP  string
 	Log map[string]*ServerLogRecordType
 }
 
-// data type for request/response headers
-type HeadersType map[string]string
-
 // data type for client request
 type ClientRequestType struct {
-	Method string
-	Url string
-	Headers HeadersType
+	Method  string
+	Url     string
+	Headers http.Header
 }
 
 // data type for client check request
-type ClientCheckType struct {
+type ClientStatusType struct {
 	Request string
 }
 
 // data type for service request
 type ServiceResponseType struct {
-	Id string
-	Status int
-	Headers HeadersType
-	Length int
+	Id      string
+	Status  string
+	Headers http.Header
+	Length  string
 }
 
 // all action to processing client request:
@@ -53,9 +51,9 @@ func (server *ServerType) HandlerClientRequest(w http.ResponseWriter, r *http.Re
 	var (
 		err error
 
-		decoder *json.Decoder
+		decoder       *json.Decoder
 		clientRequest ClientRequestType
-		requestKey string
+		id            string
 	)
 
 	defer func() {
@@ -93,27 +91,26 @@ func (server *ServerType) HandlerClientRequest(w http.ResponseWriter, r *http.Re
 	}
 
 	// log events
-	requestKey = buildRequestKey(DefaultRequestKey)
-	server.Log[requestKey] = &ServerLogRecordType{
-		Received: time.Now(),
-		ClientData:  clientRequest,
+	id = buildRequestKey(DefaultRequestKey)
+	server.Log[id] = &ServerLogRecordType{
+		Received:   time.Now(),
+		ClientData: clientRequest,
 	}
 
-	fmt.Println("===", requestKey, "===")
+	fmt.Println("===", id, "===")
 	fmt.Println()
 	fmt.Println("[CLIENT REQUEST]")
-	fmt.Println(server.Log[requestKey].Received.String())
-	fmt.Println(server.Log[requestKey].ClientData)
+	fmt.Println(server.Log[id].Received.String())
+	fmt.Println(server.Log[id].ClientData)
 	fmt.Println()
 
 	// send to 3d-party service request
-
-
+	go server.sendServiceRequest(id)
 
 	// prepare response
 	w.WriteHeader(http.StatusAccepted)
 
-	_, err = w.Write([]byte(requestKey))
+	_, err = w.Write([]byte(id))
 	if err != nil {
 		fmt.Println("[error] build success response:", err)
 		http.Error(w, "error", http.StatusInternalServerError)
@@ -125,9 +122,9 @@ func (server *ServerType) HandlerClientStatus(w http.ResponseWriter, r *http.Req
 	var (
 		err error
 
-		decoder *json.Decoder
-		clientCheck ClientCheckType
-		jsonData []byte
+		decoder     *json.Decoder
+		clientCheck ClientStatusType
+		jsonData    []byte
 	)
 
 	defer func() {
@@ -169,27 +166,36 @@ func (server *ServerType) HandlerClientStatus(w http.ResponseWriter, r *http.Req
 	fmt.Println("[STATUS REQUEST]")
 
 	// check request status and prepare response
-	if server.Log[clientCheck.Request].ServiceData.Id == "" {
-		fmt.Println("continue waiting response")
+	if _, ok := server.Log[clientCheck.Request]; !ok {
+		fmt.Println("request isn't registered")
 
-		w.WriteHeader(http.StatusAccepted)
-		_, err = w.Write([]byte(clientCheck.Request))
+		w.WriteHeader(http.StatusNotFound)
+		_, err = w.Write([]byte("request isn't registered"))
 	} else {
-		server.Log[clientCheck.Request].Received = time.Now()
+		if server.Log[clientCheck.Request].ServiceData.Id == "" {
+			fmt.Println("continue waiting response")
 
-		fmt.Println(server.Log[clientCheck.Request].Received.String())
-		fmt.Println(server.Log[clientCheck.Request].ServiceData)
+			w.WriteHeader(http.StatusAccepted)
+			_, err = w.Write([]byte("continue waiting response"))
 
-		w.WriteHeader(http.StatusOK)
-
-		jsonData, err = json.Marshal(server.Log[clientCheck.Request].ServiceData)
-		if err != nil {
-			fmt.Println("[error] convert to json service response:", err)
-			http.Error(w, "error", http.StatusInternalServerError)
 			return
-		}
+		} else {
+			server.Log[clientCheck.Request].Received = time.Now()
 
-		_, err = w.Write(jsonData)
+			fmt.Println(server.Log[clientCheck.Request].Received.String())
+			fmt.Println(server.Log[clientCheck.Request].ServiceData)
+
+			w.WriteHeader(http.StatusOK)
+
+			jsonData, err = json.Marshal(server.Log[clientCheck.Request].ServiceData)
+			if err != nil {
+				fmt.Println("[error] convert to json service response:", err)
+				http.Error(w, "error", http.StatusInternalServerError)
+				return
+			}
+
+			_, err = w.Write(jsonData)
+		}
 	}
 
 	if err != nil {
@@ -199,12 +205,53 @@ func (server *ServerType) HandlerClientStatus(w http.ResponseWriter, r *http.Req
 	}
 }
 
-func (server *ServerType) HandlerServiceIn(w http.ResponseWriter, r *http.Request) {
-	//server.Log[recordKey].ServiceData = serviceResponse
-	//
-	//fmt.Println("[SERVICE RESPONSE]")
-	//fmt.Println("resource:", server.Log[recordKey].ServiceData)
-	//fmt.Println()
+func (server *ServerType) HandlerServiceResponse(w http.ResponseWriter, r *http.Request) {
+	var (
+		err error
+
+		id string
+	)
+
+	defer func() {
+		if accident := recover(); accident != nil {
+			fmt.Println()
+			fmt.Println("[recover] handler client accident:", accident)
+
+			http.Error(w, "accident", http.StatusInternalServerError)
+		}
+	}()
+
+	fmt.Println()
+
+	// we wait only POST request
+	if r.Method == http.MethodGet {
+		w.WriteHeader(http.StatusOK)
+
+		_, err = w.Write([]byte("I'm ready to POST only"))
+		if err != nil {
+			fmt.Println("[error] processing wrong request type", err)
+			http.Error(w, "error", http.StatusInternalServerError)
+		}
+
+		return
+	}
+
+	id = r.Header.Get("ID")
+
+	server.Log[id].Received = time.Now()
+	server.Log[id].ServiceData = ServiceResponseType{
+		Id:      id,
+		Status:  r.Header.Get("Status"),
+		Headers: r.Header,
+		Length:  r.Header.Get("Content-Length"),
+	}
+
+	fmt.Println("===", id, "===")
+	fmt.Println()
+	fmt.Println("[SERVICE RESPONSE]")
+	fmt.Println(server.Log[id].Received.String())
+	fmt.Println(server.Log[id].ServiceData)
+	fmt.Println()
 }
 
 // key is calculated uuid value
@@ -215,4 +262,53 @@ func buildRequestKey(key string) string {
 	}
 
 	return uuid.New().String()
+}
+
+func (server *ServerType) sendServiceRequest(requestKey string) {
+	var (
+		err error
+
+		clientData ClientRequestType
+		client     *http.Client
+		request    *http.Request
+		response   *http.Response
+	)
+
+	clientData = server.Log[requestKey].ClientData
+
+	client = &http.Client{}
+
+	switch clientData.Method {
+	case http.MethodGet:
+		request, err = http.NewRequest(clientData.Method, clientData.Url, nil)
+		if err != nil {
+			return
+		}
+
+		request.Header.Add("ID", requestKey)
+		request.Header.Add("Worker-url", server.IP)
+
+		for header, values := range clientData.Headers {
+			for _, value := range values {
+				request.Header.Add(header, value)
+			}
+		}
+
+		response, err = client.Do(request)
+		if err != nil {
+			return
+		}
+
+		defer func() {
+			if err = response.Body.Close(); err != nil {
+				fmt.Println("[error] clear response memory:", err)
+			}
+		}()
+
+		if response.StatusCode != http.StatusAccepted {
+			return
+		}
+
+	case http.MethodPost:
+	}
 }
