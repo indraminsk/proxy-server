@@ -6,4 +6,4 @@ send request to 3rd-party service. as the response you will get request key (RK)
 
 send request to fetch result. "request" is RK (see above)
 
-`curl -X POST "127.0.0.1:9080/client/status" -H "Content-Type: application/json" -d '{"request": ""}'`
+`curl -X POST "127.0.0.1:9080/client/status" -H "Content-Type: application/json" -d '{"request": "__use_generated_before_code__"}'`
