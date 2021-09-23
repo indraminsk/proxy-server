@@ -3,18 +3,17 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/google/uuid"
 	"net/http"
 	"time"
 )
 
-const DefaultRequestKey = "f229fcff-012d-4ad7-8b1a-88bf0ce2aba9"
-
 // describe structure of log record
 type ServerLogRecordType struct {
 	Received    time.Time
-	ClientData  ClientRequestType
+	ClientData  ClientDataType
 	ServiceData ServiceResponseType
 }
 
@@ -26,7 +25,7 @@ type ServerType struct {
 }
 
 // data type for client request
-type ClientRequestType struct {
+type ClientDataType struct {
 	Method  string
 	Url     string
 	Headers http.Header
@@ -52,7 +51,7 @@ func (server *ServerType) HandlerClientRequest(w http.ResponseWriter, r *http.Re
 		err error
 
 		decoder       *json.Decoder
-		clientRequest ClientRequestType
+		clientRequest ClientDataType
 		id            string
 	)
 
@@ -91,7 +90,7 @@ func (server *ServerType) HandlerClientRequest(w http.ResponseWriter, r *http.Re
 	}
 
 	// log events
-	id = buildRequestKey(DefaultRequestKey)
+	id = uuid.New().String()
 	server.Log[id] = &ServerLogRecordType{
 		Received:   time.Now(),
 		ClientData: clientRequest,
@@ -99,6 +98,14 @@ func (server *ServerType) HandlerClientRequest(w http.ResponseWriter, r *http.Re
 
 	fmt.Println("===", id, "===")
 	fmt.Println()
+
+	err = validateClientRequest(server.Log[id].ClientData)
+	if err != nil {
+		fmt.Println("[error] validate client's data:", err)
+		http.Error(w, "error", http.StatusInternalServerError)
+		return
+	}
+
 	fmt.Println("[CLIENT REQUEST]")
 	fmt.Println(server.Log[id].Received.String())
 	fmt.Println(server.Log[id].ClientData)
@@ -116,6 +123,23 @@ func (server *ServerType) HandlerClientRequest(w http.ResponseWriter, r *http.Re
 		http.Error(w, "error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// the simplest validation client's json
+func validateClientRequest(clientData ClientDataType) (err error) {
+	if clientData.Url == "" {
+		return errors.New("bad url")
+	}
+
+	if (clientData.Method != http.MethodPost) && (clientData.Method != http.MethodGet) {
+		return errors.New("not allowed http method")
+	}
+
+	if len(clientData.Headers) == 0 {
+		return errors.New("not set headers")
+	}
+
+	return err
 }
 
 func (server *ServerType) HandlerClientStatus(w http.ResponseWriter, r *http.Request) {
@@ -254,21 +278,11 @@ func (server *ServerType) HandlerServiceResponse(w http.ResponseWriter, r *http.
 	fmt.Println()
 }
 
-// key is calculated uuid value
-// in test aim we can use const DefaultRequestKey to get always the same key
-func buildRequestKey(key string) string {
-	if key != "" {
-		return key
-	}
-
-	return uuid.New().String()
-}
-
 func (server *ServerType) sendServiceRequest(requestKey string) {
 	var (
 		err error
 
-		clientData ClientRequestType
+		clientData ClientDataType
 		client     *http.Client
 		request    *http.Request
 		response   *http.Response
