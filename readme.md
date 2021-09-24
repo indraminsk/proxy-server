@@ -10,7 +10,7 @@ run 3d-party service emulationL:
 
 `clear; ./lsel` – for linux (arm64, by default will be use port 9080)
 
-run below curl requests in worker folder. if it needs change port according cmd argument. 
+run below curl requests in proxy-server folder.
 
 send request to 3rd-party service. as the response you will get request key (RK). it needs for check of status:   
 
